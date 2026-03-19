@@ -4,38 +4,39 @@ const cors    = require('cors');
 const helmet  = require('helmet');
 const morgan  = require('morgan');
 
-const webhookRoutes  = require('./routes/webhook.routes');
+const webhookRoutes   = require('./routes/webhook.routes');
+const leadRoutes      = require('./routes/lead.routes');
+const messageRoutes   = require('./routes/message.routes');
+const campaignRoutes  = require('./routes/campaign.routes');
+const analyticsRoutes = require('./routes/analytics.routes');
 const { errorHandler } = require('./utils/errorHandler');
 const logger = require('./utils/logger');
 
 const app = express();
 
-// ── Middleware ────────────────────────────────────────────────────────────────
 app.use(helmet());
 app.use(cors());
-
-// IMPORTANT: Meta sends JSON for webhooks (unlike Twilio which sends form data)
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
 app.use(morgan('combined', {
   stream: { write: msg => logger.info(msg.trim()) }
 }));
 
-// ── Health check ──────────────────────────────────────────────────────────────
 app.get('/health', (req, res) =>
   res.json({ status: 'ok', provider: 'meta', timestamp: new Date() })
 );
 
-// ── Routes ────────────────────────────────────────────────────────────────────
 app.use('/webhook/whatsapp', webhookRoutes);
+app.use('/api/leads',        leadRoutes);
+app.use('/api/messages',     messageRoutes);
+app.use('/api/campaigns',    campaignRoutes);
+app.use('/api/analytics',    analyticsRoutes);
 
-// ── Error handler (always last) ───────────────────────────────────────────────
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () =>
-  logger.info(`Server running on port ${PORT} — Meta WhatsApp Cloud API`)
+  logger.info(`Server running on port ${PORT}`)
 );
 
 module.exports = app;

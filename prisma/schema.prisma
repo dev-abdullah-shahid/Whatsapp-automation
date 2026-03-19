@@ -1,13 +1,94 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../src/generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Lead {
+  id           String         @id @default(uuid())
+  phone        String         @unique
+  name         String?
+  email        String?
+  status       LeadStatus     @default(NEW)
+  tag          LeadTag        @default(COLD)
+  metadata     Json?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  messages     Message[]
+  conversation Conversation?
+}
+
+model Message {
+  id            String        @id @default(uuid())
+  leadId        String
+  campaignId    String?
+  direction     Direction
+  body          String
+  waMessageId   String?       @unique
+  status        MessageStatus @default(SENT)
+  sentAt        DateTime      @default(now())
+  deliveredAt   DateTime?
+  readAt        DateTime?
+
+  lead          Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  campaign      Campaign?     @relation(fields: [campaignId], references: [id])
+}
+
+model Conversation {
+  id           String   @id @default(uuid())
+  leadId       String   @unique
+  context      Json     @default("[]")
+  lastActivity DateTime @default(now())
+
+  lead         Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+}
+
+model Campaign {
+  id          String         @id @default(uuid())
+  name        String
+  status      CampaignStatus @default(DRAFT)
+  template    String
+  settings    Json?
+  scheduledAt DateTime?
+  createdAt   DateTime       @default(now())
+
+  messages    Message[]
+}
+
+enum LeadStatus {
+  NEW
+  CONTACTED
+  QUALIFIED
+  CONVERTED
+  LOST
+}
+
+enum LeadTag {
+  HOT
+  WARM
+  COLD
+}
+
+enum Direction {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  QUEUED
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum CampaignStatus {
+  DRAFT
+  RUNNING
+  PAUSED
+  COMPLETED
 }

@@ -10,6 +10,7 @@ const messageRoutes   = require('./routes/message.routes');
 const campaignRoutes  = require('./routes/campaign.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const { errorHandler } = require('./utils/errorHandler');
+const { connectDB } = require('./db');
 const logger = require('./utils/logger');
 
 const app = express();
@@ -35,8 +36,14 @@ app.use('/api/analytics',    analyticsRoutes);
 app.use(errorHandler);
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () =>
-  logger.info(`Server running on port ${PORT}`)
-);
+
+async function startServer() {
+  await connectDB();
+  app.listen(PORT, () =>
+    logger.info(`Server running on port ${PORT}`)
+  );
+}
+
+startServer();
 
 module.exports = app;

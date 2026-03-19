@@ -78,4 +78,23 @@ async function deleteLead(req, res) {
   }
 }
 
-module.exports = { getLeads, getLeadById, createLead, updateLead, deleteLead };
+const { getEnrichedLead, calculateLeadScore } = require('../services/leadCapture.service');
+
+async function getEnrichedLeadById(req, res) {
+  try {
+    const lead = await getEnrichedLead(req.params.id);
+    if (!lead) return res.status(404).json({ success: false, error: 'Lead not found' });
+    res.json({ success: true, data: lead });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+}
+
+module.exports = {
+  getLeads,
+  getLeadById,
+  createLead,
+  updateLead,
+  deleteLead,
+  getEnrichedLeadById
+};

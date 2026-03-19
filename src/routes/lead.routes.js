@@ -4,12 +4,14 @@ const {
   getLeadById,
   createLead,
   updateLead,
-  deleteLead
+  deleteLead,
+  getEnrichedLeadById
 } = require('../controllers/leadController');
 
 const router = express.Router();
 
 router.get('/', getLeads);
+router.get('/:id/enriched', getEnrichedLeadById);
 router.get('/:id', getLeadById);
 router.post('/', createLead);
 router.put('/:id', updateLead);

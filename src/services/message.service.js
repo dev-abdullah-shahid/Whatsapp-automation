@@ -3,12 +3,15 @@ const logger = require('../utils/logger');
 
 async function saveMessage({ leadId, direction, body, waMessageId, status = 'SENT', campaignId }) {
   try {
-    return await prisma.message.create({
-      data: {
+    // Use upsert to handle duplicate waMessageId gracefully
+    return await prisma.message.upsert({
+      where: { waMessageId: waMessageId || `no-id-${Date.now()}` },
+      update: { status },
+      create: {
         leadId,
         direction,
         body,
-        waMessageId,
+        waMessageId: waMessageId || `no-id-${Date.now()}`,
         status,
         campaignId: campaignId || null
       }

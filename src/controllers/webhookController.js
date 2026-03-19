@@ -9,6 +9,7 @@ const {
 const { findOrCreateLead, updateLeadTag, updateLeadStatus, updateLeadMetadata } = require('../services/lead.service');
 const { saveMessage, updateMessageStatus } = require('../services/message.service');
 const { generateReply } = require('../services/ai.service');
+const { captureLeadData } = require('../services/leadCapture.service');
 const { prisma } = require('../db');
 const logger = require('../utils/logger');
 
@@ -16,12 +17,10 @@ const logger = require('../utils/logger');
 
 async function verifyWebhook(req, res) {
   const { valid, challenge } = verifyWebhookChallenge(req.query);
-
   if (valid) {
     logger.info('Webhook verified by Meta');
     return res.status(200).send(challenge);
   }
-
   logger.warn('Webhook verification failed', { query: req.query });
   return res.status(403).json({ error: 'Verification failed' });
 }
@@ -29,7 +28,6 @@ async function verifyWebhook(req, res) {
 // ─── Main Webhook Handler ─────────────────────────────────────────────────────
 
 async function receiveWebhook(req, res) {
-  // Always respond 200 immediately — Meta retries if it doesn't get this
   res.status(200).json({ status: 'ok' });
 
   const events = parseWebhookPayload(req.body);
@@ -44,8 +42,7 @@ async function receiveWebhook(req, res) {
     } catch (err) {
       logger.error('Webhook event error', {
         type: event.type,
-        error: err.message,
-        stack: err.stack
+        error: err.message
       });
     }
   }
@@ -56,21 +53,20 @@ async function receiveWebhook(req, res) {
 async function handleInboundMessage(event) {
   const { from, name, waMessageId, text, messageType } = event;
 
-  logger.info('Inbound message', { from, messageType, preview: text?.substring(0, 40) });
+  logger.info('Inbound message', {
+    from,
+    messageType,
+    preview: text?.substring(0, 40)
+  });
 
-  // 1. Mark message as read (shows blue ticks)
   await markAsRead(waMessageId);
 
-  // Only handle text messages (Phase 3 scope)
-  if (messageType !== 'text' || !text?.trim()) {
-    logger.info('Non-text message — skipping AI', { messageType });
-    return;
-  }
+  if (messageType !== 'text' || !text?.trim()) return;
 
-  // 2. Find or create lead
+  // 1. Find or create lead
   const lead = await findOrCreateLead({ phone: from, name });
 
-  // 3. Save inbound message to DB
+  // 2. Save inbound message
   await saveMessage({
     leadId: lead.id,
     direction: 'INBOUND',
@@ -79,36 +75,45 @@ async function handleInboundMessage(event) {
     status: 'DELIVERED'
   });
 
-  // 4. Update lead status to CONTACTED if still NEW
+  // 3. Update status to CONTACTED
   if (lead.status === 'NEW') {
     await updateLeadStatus(lead.id, 'CONTACTED');
   }
 
-  // 5. Load conversation history from DB
+  // 4. Load conversation history
   const conversationHistory = await getConversationHistory(lead.id);
 
-  // 6. Send typing indicator (cosmetic)
+  // 5. Typing indicator
   await sendTypingIndicator(waMessageId);
 
-  // 7. Generate AI reply
+  // 6. Generate AI reply
   const { reply, leadData } = await generateReply(
     text,
     conversationHistory,
     { name: lead.name, phone: lead.phone, tag: lead.tag }
   );
 
-  // 8. Update lead based on AI analysis
+  // 7. Quick update from AI meta tag (fast)
   if (leadData) {
-    await processLeadData(lead.id, leadData);
+    await quickUpdateLead(lead.id, leadData);
   }
 
-  // 9. Save conversation turn to DB
+  // 8. Save conversation turn
   await saveConversationTurn(lead.id, text, reply);
 
-  // 10. Send AI reply to customer
+  // 9. Deep lead capture (runs every 2nd message)
+  const updatedHistory = [...conversationHistory,
+    { role: 'user', content: text },
+    { role: 'assistant', content: reply }
+  ];
+  captureLeadData(lead.id, updatedHistory).catch(err =>
+    logger.error('Lead capture failed', { error: err.message })
+  );
+
+  // 10. Send reply
   const { messageId } = await sendTextMessage(from, reply);
 
-  // 11. Save outbound message to DB
+  // 11. Save outbound message
   await saveMessage({
     leadId: lead.id,
     direction: 'OUTBOUND',
@@ -117,28 +122,26 @@ async function handleInboundMessage(event) {
     status: 'SENT'
   });
 
-  logger.info('AI reply sent', { to: from, tag: leadData?.tag });
+  logger.info('Reply sent', {
+    to: from,
+    tag: leadData?.tag,
+    intent: leadData?.intent
+  });
 }
 
 // ─── Status Update Handler ────────────────────────────────────────────────────
 
 async function handleStatusUpdate(event) {
   const { waMessageId, status, errorCode, errorMessage } = event;
-
   logger.info('Status update', { waMessageId, status });
-
   if (errorCode) {
-    logger.error('Message error from Meta', { waMessageId, errorCode, errorMessage });
+    logger.error('Meta delivery error', { waMessageId, errorCode, errorMessage });
   }
-
   await updateMessageStatus(waMessageId, status);
 }
 
-// ─── Helper Functions ─────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-/**
- * Load last 10 messages for this lead as OpenAI-format history
- */
 async function getConversationHistory(leadId) {
   const messages = await prisma.message.findMany({
     where: { leadId },
@@ -152,9 +155,6 @@ async function getConversationHistory(leadId) {
   }));
 }
 
-/**
- * Save both sides of conversation turn to Conversation table
- */
 async function saveConversationTurn(leadId, userMessage, assistantReply) {
   const existing = await prisma.conversation.findUnique({ where: { leadId } });
   const context = existing?.context || [];
@@ -163,7 +163,7 @@ async function saveConversationTurn(leadId, userMessage, assistantReply) {
     ...context,
     { role: 'user', content: userMessage, ts: new Date().toISOString() },
     { role: 'assistant', content: assistantReply, ts: new Date().toISOString() }
-  ].slice(-20); // Keep last 20 turns
+  ].slice(-20);
 
   await prisma.conversation.upsert({
     where: { leadId },
@@ -172,47 +172,29 @@ async function saveConversationTurn(leadId, userMessage, assistantReply) {
   });
 }
 
-/**
- * Apply AI-extracted lead data to the lead record
- */
-async function processLeadData(leadId, leadData) {
+async function quickUpdateLead(leadId, leadData) {
   try {
     const updates = {};
 
-    // Update tag if AI detected a change
-    if (leadData.tag && ['HOT', 'WARM', 'COLD'].includes(leadData.tag)) {
-      await updateLeadTag(leadId, leadData.tag);
-    }
-
-    // Update name if AI extracted it and we don't have it
+    if (leadData.tag) updates.tag = leadData.tag;
     if (leadData.extractedName) {
       const lead = await prisma.lead.findUnique({ where: { id: leadId } });
-      if (!lead.name) {
-        await prisma.lead.update({
-          where: { id: leadId },
-          data: { name: leadData.extractedName }
-        });
-      }
+      if (!lead.name) updates.name = leadData.extractedName;
+    }
+    if (leadData.extractedEmail) updates.email = leadData.extractedEmail;
+
+    if (Object.keys(updates).length > 0) {
+      await prisma.lead.update({ where: { id: leadId }, data: updates });
     }
 
-    // Update email if extracted
-    if (leadData.extractedEmail) {
-      await prisma.lead.update({
-        where: { id: leadId },
-        data: { email: leadData.extractedEmail }
-      });
-    }
-
-    // Save intent to metadata
     if (leadData.intent) {
       await updateLeadMetadata(leadId, {
         lastIntent: leadData.intent,
-        lastAiConfidence: leadData.confidence,
         lastActivityAt: new Date().toISOString()
       });
     }
   } catch (err) {
-    logger.error('processLeadData error', { leadId, error: err.message });
+    logger.error('quickUpdateLead error', { error: err.message });
   }
 }
 

@@ -4,10 +4,8 @@ const logger = require('../utils/logger');
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // ─── System Prompt ────────────────────────────────────────────────────────────
-// This is the brain of your AI sales agent.
-// Customize this for your specific business.
 
-const SYSTEM_PROMPT = `You are Sarah, a friendly and professional sales assistant on WhatsApp for a business.
+const SYSTEM_PROMPT = `You are Sarah, a friendly and professional sales assistant on WhatsApp.
 
 YOUR PERSONALITY:
 - Warm, genuine, and helpful — never robotic or salesy
@@ -34,49 +32,33 @@ QUALIFICATION QUESTIONS TO ASK (pick naturally based on context):
 RULES:
 - Never mention you are an AI unless directly asked
 - Never make up prices — say "I'll get you the exact pricing shortly"
-- If asked something you don't know, say "Great question, let me check that for you"
+- If asked something you don't know say "Great question, let me check that for you"
 - Never send more than 3 sentences per reply
 - Always end with either a question OR a clear next step
 
-LEAD SCORING — after every message assess the lead:
+LEAD SCORING — assess after every message:
 - HOT: mentions budget, asks about pricing/availability, urgent timeline, ready to decide
 - WARM: interested, asking questions, comparing options, no urgency
 - COLD: just browsing, vague interest, no clear need
 
 At the END of every response add this hidden tag (user never sees it):
-[META:{"tag":"HOT|WARM|COLD","intent":"one sentence","extractedName":"or null","extractedEmail":"or null","confidence":0.0-1.0}]`;
+[META:{"tag":"HOT|WARM|COLD","intent":"one sentence","extractedName":"or null","extractedEmail":"or null","extractedBudget":"or null","extractedProduct":"or null","confidence":0.0-1.0}]`;
 
-// ─── Core Functions ───────────────────────────────────────────────────────────
+// ─── Generate Reply ───────────────────────────────────────────────────────────
 
-/**
- * Generate an AI reply for an inbound WhatsApp message
- *
- * @param {string} userMessage       - The customer's message
- * @param {Array}  conversationHistory - [{role:'user'|'assistant', content:'...'}]
- * @param {Object} leadInfo          - Known lead data {name, phone, tag}
- * @returns {Promise<{reply, leadData}>}
- */
 async function generateReply(userMessage, conversationHistory = [], leadInfo = {}) {
   try {
-    // Inject known lead info into system context
     const contextNote = leadInfo.name
-      ? `\n\nKNOWN INFO: Customer's name is ${leadInfo.name}.`
+      ? `\n\nKNOWN INFO: Customer name is ${leadInfo.name}.`
       : '';
 
     const messages = [
-      {
-        role: 'system',
-        content: SYSTEM_PROMPT + contextNote
-      },
-      // Include conversation history (last 10 messages max)
+      { role: 'system', content: SYSTEM_PROMPT + contextNote },
       ...conversationHistory.slice(-10).map(m => ({
         role: m.role,
         content: m.content
       })),
-      {
-        role: 'user',
-        content: userMessage
-      }
+      { role: 'user', content: userMessage }
     ];
 
     const response = await openai.chat.completions.create({
@@ -88,7 +70,7 @@ async function generateReply(userMessage, conversationHistory = [], leadInfo = {
 
     const fullResponse = response.choices[0].message.content;
 
-    // Extract hidden metadata tag
+    // Extract hidden metadata
     const metaMatch = fullResponse.match(/\[META:(.*?)\]/s);
     let leadData = null;
 
@@ -100,10 +82,7 @@ async function generateReply(userMessage, conversationHistory = [], leadInfo = {
       }
     }
 
-    // Remove hidden tag before sending to customer
-    const cleanReply = fullResponse
-      .replace(/\[META:.*?\]/s, '')
-      .trim();
+    const cleanReply = fullResponse.replace(/\[META:.*?\]/s, '').trim();
 
     logger.info('AI reply generated', {
       tokens: response.usage?.total_tokens,
@@ -114,18 +93,77 @@ async function generateReply(userMessage, conversationHistory = [], leadInfo = {
     return { reply: cleanReply, leadData };
   } catch (error) {
     logger.error('OpenAI error', { error: error.message });
-
-    // Always return a fallback so customer gets a response
     return {
-      reply: "Thanks for your message! 😊 I'll get back to you in just a moment.",
+      reply: "Thank you for reaching out! 👋 Our team has received your message and will get back to you within a few minutes. Please stay tuned!",
       leadData: null
     };
   }
 }
 
+// ─── Extract Lead Info ────────────────────────────────────────────────────────
+
 /**
- * Personalize a bulk outreach message for a specific lead using AI
+ * Deeply analyze full conversation to extract structured lead data
+ * Called after every few messages to progressively build lead profile
  */
+async function extractLeadInfo(conversationHistory, existingLead = {}) {
+  try {
+    const conversationText = conversationHistory
+      .map(m => `${m.role === 'user' ? 'Customer' : 'Agent'}: ${m.content}`)
+      .join('\n');
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4o-mini',
+      messages: [{
+        role: 'user',
+        content: `Analyze this WhatsApp sales conversation and extract lead information.
+
+CONVERSATION:
+${conversationText}
+
+Extract and return ONLY a JSON object with these fields:
+{
+  "name": "full name if mentioned, else null",
+  "email": "email if mentioned, else null",
+  "budget": "budget range if mentioned, else null",
+  "product": "what product/service they want, else null",
+  "timeline": "when they need it, else null",
+  "useCase": "personal or business, else null",
+  "painPoint": "their main problem or need, else null",
+  "tag": "HOT or WARM or COLD based on buying intent",
+  "qualificationScore": 0-100,
+  "status": "NEW or CONTACTED or QUALIFIED or CONVERTED",
+  "notes": "one sentence summary of this lead"
+}
+
+Rules:
+- Only extract what is clearly stated, never guess
+- qualificationScore: 0=no intent, 50=interested, 80=ready to buy, 100=confirmed purchase
+- Return ONLY the JSON, no other text`
+      }],
+      max_tokens: 400,
+      temperature: 0
+    });
+
+    const content = response.choices[0].message.content.trim();
+    const cleaned = content.replace(/```json|```/g, '').trim();
+    const extracted = JSON.parse(cleaned);
+
+    logger.info('Lead info extracted', {
+      name: extracted.name,
+      tag: extracted.tag,
+      score: extracted.qualificationScore
+    });
+
+    return extracted;
+  } catch (error) {
+    logger.error('Lead extraction error', { error: error.message });
+    return null;
+  }
+}
+
+// ─── Personalize Message ──────────────────────────────────────────────────────
+
 async function personalizeMessage(template, lead) {
   try {
     const response = await openai.chat.completions.create({
@@ -138,13 +176,14 @@ Template: "${template}"
 
 Person:
 - Name: ${lead.name || 'Unknown'}
-- Previous interest: ${lead.metadata?.lastIntent || 'none mentioned'}
+- Interest: ${lead.metadata?.product || 'not specified'}
+- Previous intent: ${lead.metadata?.lastIntent || 'none'}
 
 Rules:
 - Max 3 sentences
-- Sound personal, not like a mass blast
+- Sound personal not like a mass message
 - Keep the core offer intact
-- Return ONLY the final message, nothing else`
+- Return ONLY the final message`
       }],
       max_tokens: 200,
       temperature: 0.8
@@ -157,18 +196,16 @@ Rules:
   }
 }
 
-/**
- * Detect intent from a single message (fast, cheap call)
- */
+// ─── Detect Intent ────────────────────────────────────────────────────────────
+
 async function detectIntent(message) {
   try {
     const response = await openai.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [{
         role: 'user',
-        content: `Classify this WhatsApp message into exactly one intent word:
+        content: `Classify this WhatsApp message intent in one word:
 "${message}"
-
 Options: greeting, inquiry, pricing, complaint, purchase, support, spam, other
 Reply with just the single lowercase word.`
       }],
@@ -182,4 +219,9 @@ Reply with just the single lowercase word.`
   }
 }
 
-module.exports = { generateReply, personalizeMessage, detectIntent };
+module.exports = {
+  generateReply,
+  extractLeadInfo,
+  personalizeMessage,
+  detectIntent
+};

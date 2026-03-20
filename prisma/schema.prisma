@@ -20,6 +20,7 @@ model Lead {
 
   messages     Message[]
   conversation Conversation?
+   enrollments    AutomationEnrollment[]
 }
 
 model Message {
@@ -59,6 +60,33 @@ model Campaign {
   messages    Message[]
 }
 
+model Automation {
+  id          String           @id @default(uuid())
+  name        String
+  trigger     AutomationTrigger
+  status      AutomationStatus @default(ACTIVE)
+  steps       Json             // Array of {message, delayMinutes}
+  createdAt   DateTime         @default(now())
+
+  enrollments AutomationEnrollment[]
+}
+
+model AutomationEnrollment {
+  id            String     @id @default(uuid())
+  automationId  String
+  leadId        String
+  currentStep   Int        @default(0)
+  status        EnrollmentStatus @default(ACTIVE)
+  nextSendAt    DateTime?
+  enrolledAt    DateTime   @default(now())
+  completedAt   DateTime?
+
+  automation    Automation @relation(fields: [automationId], references: [id])
+  lead          Lead       @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, leadId])
+}
+
 enum LeadStatus {
   NEW
   CONTACTED
@@ -91,4 +119,24 @@ enum CampaignStatus {
   RUNNING
   PAUSED
   COMPLETED
+}
+
+enum AutomationTrigger {
+  NEW_LEAD
+  NO_REPLY
+  TAG_CHANGED
+  MANUAL
+}
+
+enum AutomationStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
 }

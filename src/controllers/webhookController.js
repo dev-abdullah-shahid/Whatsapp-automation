@@ -75,11 +75,18 @@ async function handleInboundMessage(event) {
     status: 'DELIVERED'
   });
 
-  // 3. Update status to CONTACTED
-  if (lead.status === 'NEW') {
-    await updateLeadStatus(lead.id, 'CONTACTED');
-  }
+ const { cancelEnrollment, autoEnrollNewLead } = require('../services/automation.service');
 
+// 3. Cancel any active automations — lead replied
+await cancelEnrollment(lead.id);
+
+// 4. If brand new lead, auto-enroll in NEW_LEAD automations
+if (lead.status === 'NEW') {
+  await updateLeadStatus(lead.id, 'CONTACTED');
+  autoEnrollNewLead(lead.id).catch(err =>
+    logger.error('Auto enroll failed', { error: err.message })
+  );
+}
   // 4. Load conversation history
   const conversationHistory = await getConversationHistory(lead.id);
 

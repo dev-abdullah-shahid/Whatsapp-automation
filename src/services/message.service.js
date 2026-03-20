@@ -1,9 +1,10 @@
 const { prisma } = require('../db');
 const logger = require('../utils/logger');
 
+// ─── Save Message ─────────────────────────────────────────────────────────────
+
 async function saveMessage({ leadId, direction, body, waMessageId, status = 'SENT', campaignId }) {
   try {
-    // Use upsert to handle duplicate waMessageId gracefully
     return await prisma.message.upsert({
       where: { waMessageId: waMessageId || `no-id-${Date.now()}` },
       update: { status },
@@ -11,7 +12,7 @@ async function saveMessage({ leadId, direction, body, waMessageId, status = 'SEN
         leadId,
         direction,
         body,
-        waMessageId: waMessageId || `no-id-${Date.now()}`,
+        waMessageId,
         status,
         campaignId: campaignId || null
       }
@@ -22,22 +23,37 @@ async function saveMessage({ leadId, direction, body, waMessageId, status = 'SEN
   }
 }
 
+// ─── Update Message Status ────────────────────────────────────────────────────
+
 async function updateMessageStatus(waMessageId, status) {
   if (!waMessageId) return;
 
   const updateData = { status };
   if (status === 'DELIVERED') updateData.deliveredAt = new Date();
-  if (status === 'READ') updateData.readAt = new Date();
+  if (status === 'READ')      updateData.readAt      = new Date();
 
   try {
-    return await prisma.message.update({
+    const message = await prisma.message.update({
       where: { waMessageId },
       data: updateData
     });
+
+    // If this message belongs to a campaign, log the tracking event
+    if (message.campaignId) {
+      logger.info('Campaign message status updated', {
+        campaignId: message.campaignId,
+        waMessageId,
+        status
+      });
+    }
+
+    return message;
   } catch (err) {
-    logger.warn('updateMessageStatus — message not found', { waMessageId, status });
+    logger.warn('updateMessageStatus — not found', { waMessageId, status });
   }
 }
+
+// ─── Get Messages By Lead ─────────────────────────────────────────────────────
 
 async function getMessagesByLead(leadId) {
   return prisma.message.findMany({
@@ -46,6 +62,8 @@ async function getMessagesByLead(leadId) {
   });
 }
 
+// ─── Get Last Inbound Message ─────────────────────────────────────────────────
+
 async function getLastInboundMessage(leadId) {
   return prisma.message.findFirst({
     where: { leadId, direction: 'INBOUND' },
@@ -53,9 +71,31 @@ async function getLastInboundMessage(leadId) {
   });
 }
 
+// ─── Get Campaign Messages with full tracking ─────────────────────────────────
+
+async function getCampaignMessages(campaignId, { limit = 50, offset = 0 } = {}) {
+  const [messages, total] = await Promise.all([
+    prisma.message.findMany({
+      where: { campaignId },
+      orderBy: { sentAt: 'desc' },
+      take: parseInt(limit),
+      skip: parseInt(offset),
+      include: {
+        lead: {
+          select: { name: true, phone: true, tag: true, status: true }
+        }
+      }
+    }),
+    prisma.message.count({ where: { campaignId } })
+  ]);
+
+  return { messages, total };
+}
+
 module.exports = {
   saveMessage,
   updateMessageStatus,
   getMessagesByLead,
-  getLastInboundMessage
+  getLastInboundMessage,
+  getCampaignMessages
 };

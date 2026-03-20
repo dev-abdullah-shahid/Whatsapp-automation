@@ -10,6 +10,7 @@ const messageRoutes    = require('./routes/message.routes');
 const campaignRoutes   = require('./routes/campaign.routes');
 const analyticsRoutes  = require('./routes/analytics.routes');
 const automationRoutes = require('./routes/automation.routes');
+const trackingRoutes   = require('./routes/tracking.routes');
 const { errorHandler } = require('./utils/errorHandler');
 const { connectDB }    = require('./db');
 const logger           = require('./utils/logger');
@@ -29,12 +30,13 @@ app.get('/', (req, res) => res.json({
   version: '1.0.0',
   status: 'running',
   endpoints: {
-    health:      'GET  /health',
-    leads:       'GET  /api/leads',
-    messages:    'GET  /api/messages/:leadId',
-    campaigns:   'GET  /api/campaigns',
-    automations: 'GET  /api/automations',
-    analytics:   'GET  /api/analytics/overview',
+    health:      'GET /health',
+    leads:       'GET /api/leads',
+    messages:    'GET /api/messages/:leadId',
+    campaigns:   'GET /api/campaigns',
+    automations: 'GET /api/automations',
+    analytics:   'GET /api/analytics/overview',
+    tracking:    'GET /api/tracking/dashboard',
     webhook:     'POST /webhook/whatsapp'
   }
 }));
@@ -49,6 +51,7 @@ app.use('/api/messages',     messageRoutes);
 app.use('/api/campaigns',    campaignRoutes);
 app.use('/api/analytics',    analyticsRoutes);
 app.use('/api/automations',  automationRoutes);
+app.use('/api/tracking',     trackingRoutes);
 
 app.use(errorHandler);
 

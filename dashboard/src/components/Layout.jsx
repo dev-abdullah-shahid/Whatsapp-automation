@@ -137,7 +137,7 @@ export default function Layout({ children }) {
             flexShrink: 0,
           }}>
             <div style={{ fontFamily:'var(--font)', fontSize:15, fontWeight:400, fontStyle:'italic', color:'var(--text)', letterSpacing:'-0.01em', lineHeight:1.3 }}>
-              WhatsApp AI
+              Olympify
             </div>
             <div style={{ fontSize:10, color:'var(--text3)', fontWeight:500, letterSpacing:'0.04em', textTransform:'uppercase' }}>
               Growth Platform

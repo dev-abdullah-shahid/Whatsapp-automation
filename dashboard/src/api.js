@@ -1,5 +1,5 @@
 import axios from 'axios';
-const API = axios.create({ baseURL: import.meta.env.VITE_API_URL || 'http://localhost:3000' });
+const API = axios.create({ baseURL: 'https://whatsapp-automation-ekyl.onrender.com' });
 export const getLeads            = (p)    => API.get('/api/leads', { params:p });
 export const getLead             = (id)   => API.get(`/api/leads/${id}`);
 export const getLeadConversation = (id)   => API.get(`/api/leads/${id}/conversation`);

@@ -161,7 +161,7 @@ export default function Leads() {
         </div>
         <div style={{ display:'flex', gap:8 }}>
           <button onClick={fetch} className="btn btn-ghost btn-sm">↻ Refresh</button>
-          <a href="http://localhost:3000/api/leads/export" className="btn btn-ghost btn-sm" style={{ textDecoration:'none' }}>↓ Export CSV</a>
+          <a href={`${import.meta.env.VITE_API_URL}/api/leads/export`} className="btn btn-ghost btn-sm" style={{ textDecoration:'none' }}>↓ Export CSV</a>
           {selected.size > 0 && (
             <div style={{ display:'flex', gap:6, padding:'4px 10px', background:'var(--indigo-lt)', border:'1px solid #c7d2fe', borderRadius:'var(--r2)', alignItems:'center', fontSize:12, color:'var(--indigo)', fontWeight:600 }}>
               {selected.size} selected

@@ -12,6 +12,7 @@ const { generateReply } = require('../services/ai.service');
 const { captureLeadData } = require('../services/leadCapture.service');
 const { prisma } = require('../db');
 const logger = require('../utils/logger');
+const { cancelEnrollment, autoEnrollNewLead } = require('../services/automation.service');
 
 // ─── Webhook Verification ─────────────────────────────────────────────────────
 
@@ -67,15 +68,19 @@ async function handleInboundMessage(event) {
   const lead = await findOrCreateLead({ phone: from, name });
 
   // 2. Save inbound message
-  await saveMessage({
-    leadId: lead.id,
-    direction: 'INBOUND',
-    body: text,
-    waMessageId,
-    status: 'DELIVERED'
-  });
+try {
+    await saveMessage({
+      leadId:     lead.id,
+      direction:  'INBOUND',
+      body:       text,
+      waMessageId: waMessageId,
+      status:     'DELIVERED'
+    });
+    logger.info('Inbound message saved', { leadId: lead.id });
+  } catch (err) {
+    logger.error('Failed to save inbound message', { error: err.message });
+  }
 
- const { cancelEnrollment, autoEnrollNewLead } = require('../services/automation.service');
 
 // 3. Cancel any active automations — lead replied
 await cancelEnrollment(lead.id);

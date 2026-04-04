@@ -2,7 +2,11 @@ import axios from 'axios';
 const API = axios.create({ baseURL: 'https://whatsapp-automation-ekyl.onrender.com' });
 export const getLeads            = (p)    => API.get('/api/leads', { params:p });
 export const getLead             = (id)   => API.get(`/api/leads/${id}`);
-export const getLeadConversation = (id)   => API.get(`/api/leads/${id}/conversation`);
+export const getLeadConversation = (id) => 
+  API.get(`/api/leads/${id}/conversation`, {
+    headers: { 'Cache-Control': 'no-cache' },
+    params: { t: Date.now() }
+  });
 export const updateLead          = (id,d) => API.put(`/api/leads/${id}`, d);
 export const addNote             = (id,n) => API.post(`/api/leads/${id}/notes`, { note:n });
 export const exportLeads         = (p)    => API.get('/api/leads/export', { params:p, responseType:'blob' });
